@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Eat & Watch</title>
+  <style>
+    :root{--bg:#f9f9f9;--text:#333;--card-bg:#fff;--card-shadow:rgba(0,0,0,0.1);--link:#007BFF;--link-hover:#0056b3}
+    .dark{--bg:#181818;--text:#eaeaea;--card-bg:#242424;--card-shadow:rgba(255,255,255,0.1);--link:#bb86fc;--link-hover:#3700b3}
+    *,*::before,*::after{box-sizing:border-box}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column;align-items:center;padding:20px;background:var(--bg);color:var(--text);min-height:100vh;transition:background .3s,color .3s}
+    #theme-toggle{position:absolute;top:20px;right:20px;background:none;border:none;cursor:pointer;font-size:1.2rem}
+    h1{font-size:2rem;margin-bottom:10px}
+    #user-score{margin-bottom:20px}
+    #videos{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:20px;width:100%;max-width:1000px}
+    .video{background:var(--card-bg);border-radius:10px;box-shadow:0 2px 5px var(--card-shadow);text-align:center;padding:10px;transition:transform .2s}
+    .video:hover{transform:scale(1.02)}
+    .video img{width:100%;border-radius:5px}
+    .video a{display:block;margin:10px 0;text-decoration:none;color:var(--link);font-weight:bold;word-break:break-word}
+    .video a:hover{color:var(--link-hover)}
+    .actions{display:flex;justify-content:center;gap:10px;margin:5px 0}
+    .actions button{background:none;border:none;font-size:1.2rem;cursor:pointer;display:flex;align-items:center}
+    .actions button.disabled{opacity:.5;cursor:default}
+    .actions span{margin-left:5px;font-size:.9rem}
+    #form{margin:20px 0;display:flex;gap:10px;width:100%;max-width:600px}
+    #form input,#form button{flex:1;padding:10px;border:1px solid #ccc;border-radius:5px;font-size:1rem}
+    #form button{background:var(--link);color:#fff;border:none;cursor:pointer;transition:background .3s}
+    #form button:hover{background:var(--link-hover)}
+  </style>
+</head>
+<body>
+  <button id="theme-toggle">🌙</button>
+  <h1>Eat & Watch</h1>
+  <div id="user-score">Score: <span>0</span></div>
+  <div id="videos"></div>
+  <form id="form"><input type="url" id="url" placeholder="YouTube URL" required/><button type="submit">Add Recommendation</button></form>
+  <script>
+    const themeToggle=document.getElementById('theme-toggle');
+    const applyTheme=m=>{document.documentElement.classList.toggle('dark',m==='dark');themeToggle.textContent=m==='dark'?'☀️':'🌙'};
+    let theme=localStorage.getItem('theme')||(window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');applyTheme(theme);
+    themeToggle.onclick=()=>{theme=theme==='dark'?'light':'dark';localStorage.setItem('theme',theme);applyTheme(theme)};
+    const getRecs=()=>fetch('/api/videos').then(r=>r.json());
+    const addRec=id=>fetch('/api/videos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}).then(r=>r.ok?null:r.json().then(e=>alert(e.error)));
+    const voteReq=(id,v)=>fetch(`/api/videos/${id}/vote`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vote:v})}).then(r=>r.json());
+    const fetchScore=()=>fetch('/api/user/score').then(r=>r.json()).then(d=>document.querySelector('#user-score span').textContent=d.score);
+    const extractID=url=>{try{const u=new URL(url),h=u.hostname.toLowerCase();if(h.includes('youtube.com'))return u.searchParams.get('v');if(h==='youtu.be')return u.pathname.slice(1)}catch{}return null};
+    const shuffle=a=>{for(let i=a.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a};
+    async function render(){const c=document.getElementById('videos');c.innerHTML='';const recs=shuffle(await getRecs());for(const r of recs){const card=document.createElement('div');card.className='video';const img=document.createElement('img');img.src=r.thumbnail_url||`https://img.youtube.com/vi/${r.id}/hqdefault.jpg`;const link=document.createElement('a');link.href=`https://youtu.be/${r.id}`;link.target='_blank';let title=r.title; if(!title){try{title=(await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${r.id}&format=json`).then(r=>r.json())).title;}catch{}}link.textContent=title||r.id;const actions=document.createElement('div');actions.className='actions';const lb=document.createElement('button');lb.innerHTML=`👍<span>${r.likes}</span>`;const db=document.createElement('button');db.innerHTML=`👎<span>${r.dislikes}</span>`;if(r.i_like){lb.disabled=true;lb.classList.add('disabled')}if(r.i_dislike){db.disabled=true;db.classList.add('disabled')}lb.onclick=async()=>{if(lb.disabled)return;const res=await voteReq(r.id,'like');lb.disabled=true;db.disabled=false;lb.classList.add('disabled');db.classList.remove('disabled');lb.querySelector('span').textContent=res.likes;db.querySelector('span').textContent=res.dislikes;fetchScore()};db.onclick=async()=>{if(db.disabled)return;const res=await voteReq(r.id,'dislike');db.disabled=true;lb.disabled=false;db.classList.add('disabled');lb.classList.remove('disabled');lb.querySelector('span').textContent=res.likes;db.querySelector('span').textContent=res.dislikes;fetchScore()};actions.append(lb,db);card.append(img,link,actions);c.append(card)}}
+    document.getElementById('form').addEventListener('submit',async e=>{e.preventDefault();const id=extractID(document.getElementById('url').value.trim());if(!id)return alert('Only YouTube links allowed');await addRec(id);document.getElementById('url').value='';render();fetchScore()});
+    render();fetchScore();
+  </script>
+</body>
+</html>
